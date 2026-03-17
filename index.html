@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>World Conquer PRO</title>
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+<style>
+body {
+  margin:0;
+  font-family:Arial;
+  background:#111;
+  color:white;
+  text-align:center;
+}
+
+#map {
+  height:55vh;
+}
+
+button {
+  padding:10px;
+  margin:10px;
+  background:limegreen;
+  border:none;
+  border-radius:8px;
+  font-size:16px;
+}
+
+#leaderboard {
+  font-size:14px;
+  margin-top:10px;
+}
+</style>
+</head>
+
+<body>
+
+<h2>🌍 World Conquer PRO</h2>
+
+<div id="map"></div>
+
+<p>🟩 Gebiete: <span id="tiles">0</span></p>
+<p>⭐ Level: <span id="level">1</span> | XP: <span id="xp">0</span></p>
+
+<button onclick="startTracking()">Start Tracking</button>
+
+<div id="leaderboard"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getFirestore, doc, setDoc, onSnapshot, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+// 🔥 DEINE FIREBASE CONFIG (fertig)
+const firebaseConfig = {
+  apiKey: "AIzaSyC23GQpoasq8xwYMKfyvNG841mTscGUFI4",
+  authDomain: "world-conquer-2c796.firebaseapp.com",
+  projectId: "world-conquer-2c796",
+  storageBucket: "world-conquer-2c796.firebasestorage.app",
+  messagingSenderId: "784827702746",
+  appId: "1:784827702746:web:84e991b4724935d65e74e3"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// USER ID
+let userId = localStorage.getItem("userId");
+if (!userId){
+  userId = "user_" + Math.random().toString(36).substr(2,9);
+  localStorage.setItem("userId", userId);
+}
+
+// MAP
+let map = L.map('map').setView([53.55,10.0],13);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom:19
+}).addTo(map);
+
+let marker;
+
+const TILE_SIZE = 0.001;
+
+let visitedTiles = {};
+let drawnTiles = {};
+let xp = 0;
+
+// TILE SYSTEM
+function getTile(lat,lon){
+  return Math.floor(lat/TILE_SIZE)+"_"+Math.floor(lon/TILE_SIZE);
+}
+
+function drawTile(tile,color){
+  if (drawnTiles[tile]) return;
+
+  let [x,y]=tile.split("_").map(Number);
+
+  let bounds=[
+    [x*TILE_SIZE,y*TILE_SIZE],
+    [(x+1)*TILE_SIZE,(y+1)*TILE_SIZE]
+  ];
+
+  drawnTiles[tile]=L.rectangle(bounds,{
+    color:color,
+    fillOpacity:0.4,
+    weight:1
+  }).addTo(map);
+}
+
+// CLAIM / STEAL
+async function claimTile(tile){
+  const tileRef = doc(db,"tiles",tile);
+
+  await setDoc(tileRef,{
+    owner:userId,
+    time:Date.now()
+  });
+
+  visitedTiles[tile]=true;
+  xp += 10;
+
+  updateUI();
+}
+
+// UI
+function updateUI(){
+  let count = Object.keys(visitedTiles).length;
+
+  document.getElementById("tiles").innerText = count;
+  document.getElementById("xp").innerText = xp;
+
+  let level = Math.floor(xp/100)+1;
+  document.getElementById("level").innerText = level;
+}
+
+// TRACKING
+function track(pos){
+  let lat = pos.coords.latitude;
+  let lon = pos.coords.longitude;
+
+  let tile = getTile(lat,lon);
+  claimTile(tile);
+
+  if (!marker){
+    marker = L.marker([lat,lon]).addTo(map);
+  } else {
+    marker.setLatLng([lat,lon]);
+  }
+
+  map.setView([lat,lon]);
+}
+
+window.startTracking = function(){
+  navigator.geolocation.watchPosition(track, ()=>alert("GPS Fehler"), {
+    enableHighAccuracy:true
+  });
+};
+
+// LIVE MAP (ALLE SPIELER)
+onSnapshot(collection(db,"tiles"), snapshot=>{
+  snapshot.forEach(docSnap=>{
+    let data = docSnap.data();
+    let tile = docSnap.id;
+
+    if (data.owner === userId){
+      drawTile(tile,"lime");
+      visitedTiles[tile]=true;
+    } else {
+      drawTile(tile,"red");
+    }
+  });
+
+  updateUI();
+});
+
+// LEADERBOARD
+async function loadLeaderboard(){
+  let snapshot = await getDocs(collection(db,"tiles"));
+  let scores = {};
+
+  snapshot.forEach(doc=>{
+    let owner = doc.data().owner;
+    scores[owner] = (scores[owner]||0)+1;
+  });
+
+  let sorted = Object.entries(scores)
+    .sort((a,b)=>b[1]-a[1])
+    .slice(0,5);
+
+  let html = "<h3>🏆 Top Spieler</h3>";
+
+  sorted.forEach((p,i)=>{
+    html += `<p>${i+1}. ${p[0]}: ${p[1]} Felder</p>`;
+  });
+
+  document.getElementById("leaderboard").innerHTML = html;
+}
+
+setInterval(loadLeaderboard,5000);
+
+</script>
+
+</body>
+</html>
